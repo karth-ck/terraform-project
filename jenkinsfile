@@ -1,6 +1,11 @@
 pipeline {
     agent any
 
+    options {
+        // Prevent Jenkins from doing an automatic checkout to a non-existent branch (like master)
+        skipDefaultCheckout(true)
+    }
+
     environment {
         TF_VAR_aws_region = 'ap-south-1'
     }
@@ -8,7 +13,8 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git 'https://github.com/karth-ck/terraform-project.git'
+                // Explicitly check out from the 'main' branch
+                git branch: 'main', url: 'https://github.com/karth-ck/terraform-project.git'
             }
         }
 
@@ -16,6 +22,14 @@ pipeline {
             steps {
                 dir('terraform') {
                     sh 'terraform init'
+                }
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                dir('terraform') {
+                    sh 'terraform plan'
                 }
             }
         }
@@ -31,9 +45,14 @@ pipeline {
         stage('Upload HTML') {
             steps {
                 script {
+                    // Extract EC2 public IP from terraform output
                     def ip = sh(script: "terraform -chdir=terraform output -raw instance_ip", returnStdout: true).trim()
-                    sh "scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa html/index.html ec2-user@${ip}:/tmp/index.html"
-                    sh "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ec2-user@${ip} 'sudo mv /tmp/index.html /var/www/html/index.html'"
+
+                    // Upload HTML file to EC2 and move it to the web server directory
+                    sh """
+                        scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa html/index.html ec2-user@${ip}:/tmp/index.html
+                        ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ec2-user@${ip} 'sudo mv /tmp/index.html /var/www/html/index.html'
+                    """
                 }
             }
         }
